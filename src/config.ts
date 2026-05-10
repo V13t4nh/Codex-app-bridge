@@ -14,7 +14,7 @@ export interface AppConfig {
 }
 
 const DEFAULT_CODEX_CDP_URL = 'http://127.0.0.1:9222';
-const DEFAULT_CODEX_TIMEOUT_MS = 180_000;
+const DEFAULT_CODEX_TIMEOUT_MS = 30 * 60 * 1_000;
 const LOG_LEVELS = new Set<LogLevel>(['debug', 'info', 'warn', 'error']);
 const CHAT_MODES = new Set<ChatMode>(['current', 'new']);
 
@@ -31,7 +31,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     telegramBotToken: emptyToUndefined(env.TELEGRAM_BOT_TOKEN),
     telegramAllowedUserIds: parseAllowedUserIds(env.TELEGRAM_ALLOWED_USER_IDS),
     logLevel,
-    codexTimeoutMs: DEFAULT_CODEX_TIMEOUT_MS,
+    codexTimeoutMs: parsePositiveInteger(env.CODEX_TIMEOUT_MS) ?? DEFAULT_CODEX_TIMEOUT_MS,
     codexWorkspaceName: emptyToUndefined(env.CODEX_WORKSPACE_NAME),
     codexChatMode,
   };
@@ -50,4 +50,9 @@ function parseAllowedUserIds(raw?: string): number[] {
 function emptyToUndefined(value?: string): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function parsePositiveInteger(raw?: string): number | undefined {
+  const value = Number(raw?.trim());
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

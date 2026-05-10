@@ -8,6 +8,7 @@ describe('loadConfig', () => {
     expect(config.telegramBotToken).toBeUndefined();
     expect(config.telegramAllowedUserIds).toEqual([]);
     expect(config.logLevel).toBe('info');
+    expect(config.codexTimeoutMs).toBe(1_800_000);
     expect(config.codexWorkspaceName).toBeUndefined();
     expect(config.codexChatMode).toBe('current');
   });
@@ -23,5 +24,11 @@ describe('loadConfig', () => {
   test('falls back to current chat mode for invalid values', () => {
     const config = loadConfig({ CODEX_CHAT_MODE: 'invalid' });
     expect(config.codexChatMode).toBe('current');
+  });
+
+  test('parses Codex timeout override', () => {
+    expect(loadConfig({ CODEX_TIMEOUT_MS: '600000' }).codexTimeoutMs).toBe(600_000);
+    expect(loadConfig({ CODEX_TIMEOUT_MS: '0' }).codexTimeoutMs).toBe(1_800_000);
+    expect(loadConfig({ CODEX_TIMEOUT_MS: 'nope' }).codexTimeoutMs).toBe(1_800_000);
   });
 });

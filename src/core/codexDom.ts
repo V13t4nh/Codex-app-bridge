@@ -79,42 +79,66 @@ export async function clickWorkspaceNewControl(page: Page, workspaceName: string
 
 export async function clickWorkspaceControl(page: Page, workspaceName: string, mode: ChatMode): Promise<boolean> {
   return page.evaluate(({ workspaceName, mode }) => {
-    const target = workspaceName.replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim();
+    const target = normalize(workspaceName).toLowerCase();
     const nav = document.querySelector('nav') ?? document;
+    const isVisible = (element: Element): boolean => {
+      const rect = (element as HTMLElement).getBoundingClientRect();
+      const style = window.getComputedStyle(element as HTMLElement);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const workspaceNamesFromAria = (aria: string): string[] => {
+      const projectAction = aria.match(/^Project actions for (.+)$/i)?.[1];
+      const startNew = aria.match(/^Start new chat in (.+)$/i)?.[1];
+      const exact = aria && !/^(archive|pin|filter|collapse|add|new|search|skills|plugins|automations|projects|project actions for|start new chat in|show more)/i.test(aria) ? aria : '';
+      return [exact, projectAction, startNew].map((value) => normalize(value ?? '')).filter(Boolean);
+    };
+    const valuesFor = (element: Element): string[] => {
+      const node = element as HTMLElement;
+      const rawText = node.innerText || element.textContent || '';
+      const aria = normalize(element.getAttribute('aria-label') ?? '');
+      const text = normalize(rawText);
+      const firstLine = normalize(rawText.split('\n').find(Boolean) ?? '');
+      return [aria, text, firstLine, ...workspaceNamesFromAria(aria)].filter(Boolean).map((value) => value.toLowerCase());
+    };
+    const isWorkspaceAction = (element: Element): boolean => /^(project actions for|start new chat in)/i.test(normalize(element.getAttribute('aria-label') ?? ''));
+    const findWorkspaceElement = (): HTMLElement | undefined => {
+      for (const element of Array.from(nav.querySelectorAll('a, [role="button"], [role="listitem"], button'))) {
+        if (!isVisible(element)) continue;
+        if (!valuesFor(element).some((value) => value === target)) continue;
+
+        if (isWorkspaceAction(element)) {
+          const root = element.closest('[role="listitem"]');
+          if (root && isVisible(root)) {
+            const nested = Array.from(root.querySelectorAll('a, [role="button"], [role="listitem"], button'))
+              .find((candidate) => candidate !== element && isVisible(candidate) && !isWorkspaceAction(candidate) && valuesFor(candidate).some((value) => value === target));
+            return (nested ?? root) as HTMLElement;
+          }
+        }
+
+        return element as HTMLElement;
+      }
+      return undefined;
+    };
+
     if (mode === 'new') {
       for (const element of Array.from(nav.querySelectorAll('button[aria-label]'))) {
-        const rect = (element as HTMLElement).getBoundingClientRect();
-        const style = window.getComputedStyle(element as HTMLElement);
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (aria === `start new chat in ${target}` && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
+        const aria = normalize(element.getAttribute('aria-label') ?? '').toLowerCase();
+        if (aria === `start new chat in ${target}` && isVisible(element)) {
           (element as HTMLElement).click();
           return true;
         }
       }
     }
 
-    let clickedWorkspace = false;
-    for (const element of Array.from(nav.querySelectorAll('a, [role="button"], [role="listitem"], button'))) {
-      const rect = (element as HTMLElement).getBoundingClientRect();
-      const style = window.getComputedStyle(element as HTMLElement);
-      if (rect.width <= 0 || rect.height <= 0 || style.visibility === 'hidden' || style.display === 'none') continue;
-      const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-      const text = ((element as HTMLElement).innerText || element.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-      const firstLine = (((element as HTMLElement).innerText || element.textContent || '').split('\n').find(Boolean) ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-      if (aria === target || text === target || firstLine === target) {
-        (element as HTMLElement).click();
-        clickedWorkspace = true;
-        break;
-      }
-    }
-    if (!clickedWorkspace) return false;
+    const workspaceElement = findWorkspaceElement();
+    if (!workspaceElement) return false;
+    workspaceElement.click();
 
     if (mode === 'new') {
       for (const element of Array.from(nav.querySelectorAll('button[aria-label]'))) {
-        const rect = (element as HTMLElement).getBoundingClientRect();
-        const style = window.getComputedStyle(element as HTMLElement);
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (aria === `start new chat in ${target}` && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
+        const aria = normalize(element.getAttribute('aria-label') ?? '').toLowerCase();
+        if (aria === `start new chat in ${target}` && isVisible(element)) {
           (element as HTMLElement).click();
           break;
         }
@@ -152,14 +176,14 @@ export async function clickThreadControl(page: Page, threadTitle: string): Promi
 export async function detectWorkspaceState(page: Page): Promise<WorkspaceState> {
   return page.evaluate(() => {
     const names = new Set<string>();
-    for (const element of Array.from(document.querySelectorAll('nav [role="button"], nav [role="listitem"], nav button[aria-label]'))) {
+    for (const element of Array.from(document.querySelectorAll('nav [role="list"][aria-label], nav [role="button"], nav [role="listitem"], nav button[aria-label]'))) {
       const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim();
       const projectAction = aria.match(/^Project actions for (.+)$/i)?.[1];
       const startNew = aria.match(/^Start new chat in (.+)$/i)?.[1];
       const exact = aria && !/^(archive|pin|filter|collapse|add|new|search|skills|plugins|automations|projects|project actions for|start new chat in|show more)/i.test(aria) ? aria : '';
       for (const candidate of [projectAction, startNew, exact]) {
         const value = (candidate ?? '').replace(/\s+/g, ' ').trim();
-        if (value && value.length <= 80 && !value.includes('\n') && !/ctrl\+/i.test(value)) names.add(value);
+        if (value && !value.includes('\n') && !/ctrl\+/i.test(value)) names.add(value);
       }
     }
 
@@ -167,7 +191,7 @@ export async function detectWorkspaceState(page: Page): Promise<WorkspaceState> 
       .map((element) => (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim() || ((element as HTMLElement).innerText || element.textContent || '').replace(/\s+/g, ' ').trim())
       .find(Boolean);
 
-    return { activeWorkspace: selected || undefined, workspaces: Array.from(names).sort((a, b) => a.localeCompare(b)) };
+    return { activeWorkspace: selected || undefined, workspaces: Array.from(names) };
   }).catch(() => ({ workspaces: [] }));
 }
 

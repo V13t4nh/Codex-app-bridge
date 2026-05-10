@@ -58,6 +58,7 @@ export async function fillPrompt(locator: Locator, text: string): Promise<void> 
   await locator.focus({ timeout: 5_000 }).catch(() => undefined);
   const isContentEditable = await locator.evaluate((element) => (element as HTMLElement).isContentEditable).catch(() => false);
   if (isContentEditable) {
+    if (await setContentEditableText(locator, text)) return;
     await locator.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => undefined);
     await locator.press('Backspace').catch(() => undefined);
     await locator.type(text, { delay: 5 });
@@ -71,4 +72,25 @@ export async function fillPrompt(locator: Locator, text: string): Promise<void> 
     await locator.press('Backspace').catch(() => undefined);
     await locator.type(text, { delay: 5 });
   }
+}
+
+async function setContentEditableText(locator: Locator, text: string): Promise<boolean> {
+  return locator.evaluate((element, value) => {
+    const target = element as HTMLElement;
+    target.focus();
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.deleteContents();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const inserted = document.execCommand('insertText', false, value);
+    if (!inserted) target.replaceChildren(document.createTextNode(value));
+
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return inserted || (target.textContent ?? '') === value;
+  }, text).catch(() => false);
 }

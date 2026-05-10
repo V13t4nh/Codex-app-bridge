@@ -103,7 +103,7 @@ export class CodexBridge implements TextBridge {
     return this.enqueue(async () => {
       const page = await this.getCodexPage();
       const detected = await this.detectWorkspaceState(page);
-      const names = uniqueNames(['Chats', ...detected.workspaces]);
+      const names = uniqueNames(detected.workspaces.length ? detected.workspaces : ['Chats']);
       return names.map((name) => ({ name, active: namesEqual(name, detected.activeWorkspace) || namesEqual(name, this.routedWorkspace) }));
     });
   }
