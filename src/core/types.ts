@@ -24,7 +24,6 @@ export interface BridgeResponse {
 
 export interface TextBridge {
   handleText(request: BridgeRequest): Promise<BridgeResponse>;
-  newChat(): Promise<string>;
   stopOrPause(): Promise<string>;
   getWorkspace(): Promise<string>;
   listWorkspaces(): Promise<WorkspaceOption[]>;

@@ -5,7 +5,6 @@ import type { TextBridge, BridgeRequest, BridgeResponse, BridgeTarget, ThreadOpt
 
 class FakeBridge implements TextBridge {
   requests: BridgeRequest[] = [];
-  newChatCalls = 0;
   stopCalls = 0;
   workspaceCalls = 0;
   listWorkspaceCalls = 0;
@@ -19,7 +18,6 @@ class FakeBridge implements TextBridge {
     }
     return { text: `ok:${request.text}`, metadata: { responseLength: request.text.length } };
   }
-  async newChat(): Promise<string> { this.newChatCalls += 1; return 'new-ok'; }
   async stopOrPause(): Promise<string> { this.stopCalls += 1; return 'stop-ok'; }
   async getWorkspace(): Promise<string> { this.workspaceCalls += 1; return 'workspace-ok'; }
   async listWorkspaces(): Promise<WorkspaceOption[]> {
@@ -47,12 +45,16 @@ class FakeBot {
   }
 }
 
+function registerFakeHandlers(bot: FakeBot, bridge: TextBridge, allowedUserIds = [1]): void {
+  registerTelegramHandlers(bot as never, bridge, { allowedUserIds, logger: createLogger('error') });
+}
+
 describe('telegram adapter', () => {
   test('forwards text messages to bridge', async () => {
     const bridge = new FakeBridge();
     const bot = new FakeBot();
     const replies: string[] = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [1], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge);
 
     await bot.events.get('message:text')?.({ from: { id: 1 }, message: { text: 'hello', from: { id: 1 } }, reply: async (text: string) => replies.push(text) });
 
@@ -65,7 +67,7 @@ describe('telegram adapter', () => {
     const bridge = new FakeBridge();
     const bot = new FakeBot();
     const replies: Array<{ text: string; options?: { parse_mode?: 'HTML' } }> = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [1], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge);
 
     await bot.events.get('message:text')?.({
       from: { id: 1 },
@@ -81,7 +83,7 @@ describe('telegram adapter', () => {
     const bot = new FakeBot();
     const replies: string[] = [];
     const deleted: Array<[number, number]> = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [1], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge);
 
     const ctx = {
       from: { id: 1 },
@@ -107,7 +109,7 @@ describe('telegram adapter', () => {
     const bot = new FakeBot();
     const replies: string[] = [];
     const deleted: Array<[number, number]> = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [1], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge);
 
     const ctx = {
       from: { id: 1 },
@@ -137,7 +139,7 @@ describe('telegram adapter', () => {
     const bot = new FakeBot();
     const replies: Array<{ text: string; options?: { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } } }> = [];
     const deleted: Array<[number, number]> = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [1], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge);
 
     const ctx = {
       from: { id: 1 },
@@ -193,7 +195,7 @@ describe('telegram adapter', () => {
     const bridge = new FakeBridge();
     const bot = new FakeBot();
     const replies: string[] = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [2], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge, [2]);
 
     const ctx = { from: { id: 1 }, reply: async (text: string) => replies.push(text) };
     await bot.commands.get('new')?.(ctx);
@@ -202,7 +204,6 @@ describe('telegram adapter', () => {
     await bot.commands.get('status')?.(ctx);
     await bot.commands.get('clear')?.(ctx);
 
-    expect(bridge.newChatCalls).toBe(0);
     expect(bridge.stopCalls).toBe(0);
     expect(bridge.listWorkspaceCalls).toBe(0);
     expect(replies).toEqual(['Access denied.', 'Access denied.', 'Access denied.', 'Access denied.', 'Access denied.']);
@@ -218,7 +219,7 @@ describe('telegram adapter', () => {
     const bridge = new FakeBridge();
     const bot = new FakeBot();
     const replies: string[] = [];
-    registerTelegramHandlers(bot as never, bridge, { allowedUserIds: [2], logger: createLogger('error') });
+    registerFakeHandlers(bot, bridge, [2]);
 
     await bot.commands.get('start')?.({ from: { id: 123 }, reply: async (text: string) => replies.push(text) });
 

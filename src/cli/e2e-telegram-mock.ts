@@ -29,7 +29,6 @@ class MockBridge implements TextBridge {
     return { text: `mock-codex-response:${request.text}`, metadata: { responseLength: request.text.length } };
   }
 
-  async newChat(): Promise<string> { return 'mock-new-chat'; }
   async stopOrPause(): Promise<string> { return 'mock-stop'; }
   async getWorkspace(): Promise<string> { return 'mock-workspace'; }
   async listWorkspaces(): Promise<WorkspaceOption[]> { return [{ name: 'bridge' }]; }

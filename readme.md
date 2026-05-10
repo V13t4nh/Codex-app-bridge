@@ -40,7 +40,6 @@ Không commit file `.env`. File `.env.example` là mẫu cấu hình an toàn đ
 | `CODEX_CDP_URL` | Không | `http://127.0.0.1:9222` | URL CDP của Codex Desktop/Chromium. |
 | `TELEGRAM_BOT_TOKEN` | Chỉ khi chạy Telegram | Trống | Token bot Telegram từ BotFather. Nếu trống, Telegram bị tắt. |
 | `TELEGRAM_ALLOWED_USER_IDS` | Có khi có token | Trống | Danh sách Telegram user ID được phép dùng bot, phân tách bằng dấu phẩy. |
-| `OPENAI_API_KEY` | Không | Trống | Hiện chỉ đọc từ môi trường, dành cho tích hợp sau. |
 | `LOG_LEVEL` | Không | `info` | Một trong `debug`, `info`, `warn`, `error`. |
 | `CODEX_WORKSPACE_NAME` | Không | Trống | Workspace Codex cần chọn trước khi gửi prompt. |
 | `CODEX_CHAT_MODE` | Không | `current` | `current` để dùng thread hiện tại, `new` để tạo chat mới trước mỗi prompt. |
@@ -51,7 +50,6 @@ Ví dụ `.env` tối thiểu:
 CODEX_CDP_URL=http://127.0.0.1:9222
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOWED_USER_IDS=
-OPENAI_API_KEY=
 LOG_LEVEL=info
 CODEX_WORKSPACE_NAME=
 CODEX_CHAT_MODE=current

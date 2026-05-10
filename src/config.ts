@@ -7,7 +7,6 @@ export interface AppConfig {
   codexCdpUrl: string;
   telegramBotToken?: string;
   telegramAllowedUserIds: number[];
-  openAiApiKey?: string;
   logLevel: LogLevel;
   codexTimeoutMs: number;
   codexWorkspaceName?: string;
@@ -31,7 +30,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     codexCdpUrl: env.CODEX_CDP_URL?.trim() || DEFAULT_CODEX_CDP_URL,
     telegramBotToken: emptyToUndefined(env.TELEGRAM_BOT_TOKEN),
     telegramAllowedUserIds: parseAllowedUserIds(env.TELEGRAM_ALLOWED_USER_IDS),
-    openAiApiKey: emptyToUndefined(env.OPENAI_API_KEY),
     logLevel,
     codexTimeoutMs: DEFAULT_CODEX_TIMEOUT_MS,
     codexWorkspaceName: emptyToUndefined(env.CODEX_WORKSPACE_NAME),

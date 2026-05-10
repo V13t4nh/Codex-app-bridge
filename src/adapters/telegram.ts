@@ -4,6 +4,7 @@ import type { BridgeResponse, BridgeTarget, TextBridge, ThreadOption, WorkspaceO
 import type { Logger } from '../logger.js';
 
 const MAX_TELEGRAM_MESSAGE_LENGTH = 3_900;
+const SESSION_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export const TELEGRAM_COMMANDS = [
   { command: 'workspace', description: 'Choose Codex workspace and thread' },
@@ -51,6 +52,7 @@ interface TelegramMessageRef {
 interface TelegramUserSession {
   activeTarget?: BridgeTarget;
   activeLabel?: string;
+  lastSeenAt: number;
   nextToken: number;
   tokens: Map<string, CallbackTarget>;
   cleanupMessages: TelegramMessageRef[];
@@ -362,12 +364,21 @@ function formatThreadLabel(thread: ThreadOption): string {
 }
 
 function getSession(sessions: Map<number, TelegramUserSession>, userId: number): TelegramUserSession {
+  const now = Date.now();
+  pruneExpiredSessions(sessions, now);
   let session = sessions.get(userId);
   if (!session) {
-    session = { nextToken: 0, tokens: new Map(), cleanupMessages: [] };
+    session = { lastSeenAt: now, nextToken: 0, tokens: new Map(), cleanupMessages: [] };
     sessions.set(userId, session);
   }
+  session.lastSeenAt = now;
   return session;
+}
+
+function pruneExpiredSessions(sessions: Map<number, TelegramUserSession>, now: number): void {
+  for (const [userId, session] of sessions) {
+    if (now - session.lastSeenAt > SESSION_TTL_MS) sessions.delete(userId);
+  }
 }
 
 function createCallbackToken(session: TelegramUserSession, target: CallbackTarget): string {

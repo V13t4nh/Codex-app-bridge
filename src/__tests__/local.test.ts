@@ -10,7 +10,6 @@ class FakeBridge implements TextBridge {
     return { text: `response:${request.text}`, metadata: { responseLength: request.text.length } };
   }
 
-  async newChat(): Promise<string> { return 'new'; }
   async stopOrPause(): Promise<string> { return 'stop'; }
   async getWorkspace(): Promise<string> { return 'workspace'; }
   async listWorkspaces(): Promise<WorkspaceOption[]> { return []; }

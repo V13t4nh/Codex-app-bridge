@@ -1,5 +1,15 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import type { Logger } from '../logger.js';
+import {
+  clickThreadControl as clickCodexThreadControl,
+  clickWorkspaceControl as clickCodexWorkspaceControl,
+  clickWorkspaceNewControl as clickCodexWorkspaceNewControl,
+  detectThreadState as detectCodexThreadState,
+  detectWorkspaceState as detectCodexWorkspaceState,
+  isWorkspaceOpen as isCodexWorkspaceOpen,
+  readRuntimeState as readCodexRuntimeState,
+  type CodexRuntimeState,
+} from './codexDom.js';
 import { formatDomControl, getDomControls } from './domDiscovery.js';
 import { firstVisible, firstVisibleEnabled, fillPrompt } from './playwrightHelpers.js';
 import { readResponseSnapshot, selectNewResponse, snapshotSummary, type ResponseSnapshot, type SelectedResponse } from './responseExtraction.js';
@@ -66,16 +76,6 @@ export class CodexBridge implements TextBridge {
     } finally {
       if (this.activeOperationAbort === abort) this.activeOperationAbort = undefined;
     }
-  }
-
-  async newChat(): Promise<string> {
-    return this.enqueue(async () => {
-      const page = await this.getCodexPage();
-      const clicked = this.options.workspaceName
-        ? await this.clickNewThreadControl(page, this.options.workspaceName)
-        : await this.clickFirst(NEW_CHAT_CANDIDATES, 'new chat');
-      return clicked ? 'New chat requested.' : 'Could not find a New Chat button.';
-    });
   }
 
   async stopOrPause(): Promise<string> {
@@ -191,7 +191,7 @@ export class CodexBridge implements TextBridge {
       const currentSnapshot = await readResponseSnapshot(page);
       const current = selectNewResponse(before, currentSnapshot, prompt);
       lastSnapshot = currentSnapshot;
-      lastState = await this.readRuntimeState(page);
+      lastState = await readCodexRuntimeState(page);
       const busy = lastState.stopCount > 0 || lastState.runningCount > 0;
 
       if (current && current.text !== last?.text) {
@@ -243,38 +243,12 @@ export class CodexBridge implements TextBridge {
     const deadline = Date.now() + this.options.timeoutMs;
     while (Date.now() < deadline) {
       this.throwIfAborted(signal);
-      const state = await this.readRuntimeState(page);
+      const state = await readCodexRuntimeState(page);
       if (state.stopCount === 0 && state.runningCount === 0) return;
       this.options.logger.info('Codex is busy; waiting before sending prompt', { stopCount: state.stopCount, runningCount: state.runningCount });
       await page.waitForTimeout(2_000);
     }
     throw new Error(`Timed out after ${this.options.timeoutMs}ms waiting for Codex to become ready for a new prompt.`);
-  }
-
-  private async readRuntimeState(page: Page): Promise<CodexRuntimeState> {
-    return page.evaluate(() => {
-      let stopCount = 0;
-      let runningCount = 0;
-      let sendCount = 0;
-      const buttons = Array.from(document.querySelectorAll('button'));
-      for (const element of buttons) {
-        const htmlElement = element as HTMLElement & { disabled?: boolean };
-        const rect = htmlElement.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        const style = window.getComputedStyle(htmlElement);
-        if (style.visibility === 'hidden' || style.display === 'none') continue;
-        if (htmlElement.disabled) continue;
-
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const text = (htmlElement.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (aria === 'stop' || aria === 'pause' || aria.includes('stop') || aria.includes('pause') || aria.includes('dừng')) stopCount += 1;
-        if (aria === 'send') sendCount += 1;
-        if (text.startsWith('running ') || text === 'running') runningCount += 1;
-      }
-
-      const composerText = (document.querySelector('[data-codex-composer="true"]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
-      return { stopCount, runningCount, sendCount, composerTextLength: composerText.length };
-    }).catch(() => ({ stopCount: 0, runningCount: 0, sendCount: 0, composerTextLength: 0 }));
   }
 
   private async routeTarget(page: Page, target: BridgeTarget | undefined): Promise<void> {
@@ -301,7 +275,7 @@ export class CodexBridge implements TextBridge {
     await this.ensureWorkspace(page, workspaceName, 'current');
     if (!target.threadTitle) return;
 
-    const clicked = await this.clickThreadControl(page, target.threadTitle);
+    const clicked = await clickCodexThreadControl(page, target.threadTitle);
     if (!clicked) throw new Error(`Could not find Codex thread "${target.threadTitle}" in ${workspaceName ?? 'the current workspace'}.`);
     this.routedThread = target.threadTitle;
     await page.waitForTimeout(600);
@@ -309,12 +283,12 @@ export class CodexBridge implements TextBridge {
 
   private async ensureWorkspace(page: Page, workspaceName = this.options.workspaceName, mode: ChatMode = this.options.chatMode): Promise<void> {
     if (!workspaceName) return;
-    if (mode === 'current' && namesEqual(workspaceName, 'Chats') && await this.isWorkspaceOpen(page, workspaceName)) {
+    if (mode === 'current' && namesEqual(workspaceName, 'Chats') && await isCodexWorkspaceOpen(page, workspaceName)) {
       this.routedWorkspace = workspaceName;
       return;
     }
 
-    const clicked = await this.clickWorkspaceControl(page, workspaceName, mode);
+    const clicked = await clickCodexWorkspaceControl(page, workspaceName, mode);
     if (!clicked) {
       const detected = await this.detectWorkspaceState(page);
       throw new Error(`Could not find Codex workspace "${workspaceName}" in the sidebar. Detected workspaces: ${detected.workspaces.join(', ') || 'none'}.`);
@@ -326,29 +300,9 @@ export class CodexBridge implements TextBridge {
     await page.waitForTimeout(600);
   }
 
-  private async isWorkspaceOpen(page: Page, workspaceName: string): Promise<boolean> {
-    return page.evaluate((workspaceName) => {
-      const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim().toLowerCase();
-      const target = normalize(workspaceName);
-      const visible = (element: Element): boolean => {
-        const rect = (element as HTMLElement).getBoundingClientRect();
-        const style = window.getComputedStyle(element as HTMLElement);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-      };
-
-      if (target === 'chats') {
-        return Array.from(document.querySelectorAll('nav [role="list"]'))
-          .some((element) => normalize(element.getAttribute('aria-label') ?? '') === 'chats' && visible(element));
-      }
-
-      return Array.from(document.querySelectorAll('nav [role="listitem"][aria-label]'))
-        .some((element) => normalize(element.getAttribute('aria-label') ?? '') === target && visible(element));
-    }, workspaceName).catch(() => false);
-  }
-
   private async clickNewThreadControl(page: Page, workspaceName?: string): Promise<boolean> {
     if (workspaceName) {
-      const clickedWorkspaceNew = await this.clickWorkspaceNewControl(page, workspaceName);
+      const clickedWorkspaceNew = await clickCodexWorkspaceNewControl(page, workspaceName);
       if (clickedWorkspaceNew) {
         this.routedWorkspace = workspaceName;
         this.routedThread = undefined;
@@ -364,167 +318,16 @@ export class CodexBridge implements TextBridge {
     return true;
   }
 
-  private async clickWorkspaceNewControl(page: Page, workspaceName: string): Promise<boolean> {
-    return page.evaluate((workspaceName) => {
-      const target = workspaceName.replace(/\s+/g, ' ').trim().toLowerCase();
-      const nav = document.querySelector('nav') ?? document;
-      for (const element of Array.from(nav.querySelectorAll('button[aria-label]'))) {
-        const node = element as HTMLElement;
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (aria === `start new chat in ${target}` && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
-          node.click();
-          return true;
-        }
-      }
-      return false;
-    }, workspaceName).catch(() => false);
-  }
-
-  private async clickWorkspaceControl(page: Page, workspaceName: string, mode: ChatMode): Promise<boolean> {
-    return page.evaluate(({ workspaceName, mode }) => {
-      const target = workspaceName.replace(/\s+/g, ' ').trim().toLowerCase();
-      const nav = document.querySelector('nav') ?? document;
-      if (mode === 'new') {
-        for (const element of Array.from(nav.querySelectorAll('button[aria-label]'))) {
-          const rect = (element as HTMLElement).getBoundingClientRect();
-          const style = window.getComputedStyle(element as HTMLElement);
-          const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-          if (aria === `start new chat in ${target}` && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
-            (element as HTMLElement).click();
-            return true;
-          }
-        }
-      }
-
-      let clickedWorkspace = false;
-      for (const element of Array.from(nav.querySelectorAll('a, [role="button"], [role="listitem"], button'))) {
-        const rect = (element as HTMLElement).getBoundingClientRect();
-        const style = window.getComputedStyle(element as HTMLElement);
-        if (rect.width <= 0 || rect.height <= 0 || style.visibility === 'hidden' || style.display === 'none') continue;
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const text = ((element as HTMLElement).innerText || element.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const firstLine = (((element as HTMLElement).innerText || element.textContent || '').split('\n').find(Boolean) ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (aria === target || text === target || firstLine === target) {
-          (element as HTMLElement).click();
-          clickedWorkspace = true;
-          break;
-        }
-      }
-      if (!clickedWorkspace) return false;
-
-      if (mode === 'new') {
-        for (const element of Array.from(nav.querySelectorAll('button[aria-label]'))) {
-          const rect = (element as HTMLElement).getBoundingClientRect();
-          const style = window.getComputedStyle(element as HTMLElement);
-          const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-          if (aria === `start new chat in ${target}` && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
-            (element as HTMLElement).click();
-            break;
-          }
-        }
-      }
-
-      return true;
-    }, { workspaceName, mode }).catch(() => false);
-  }
-
-  private async clickThreadControl(page: Page, threadTitle: string): Promise<boolean> {
-    return page.evaluate((threadTitle) => {
-      const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim();
-      const stripThreadMeta = (value: string): string => normalize(value).replace(/\s+(?:now|\d+[smhdw])$/i, '').trim();
-      const target = normalize(threadTitle).toLowerCase();
-      const nav = document.querySelector('nav') ?? document;
-      for (const element of Array.from(nav.querySelectorAll('a, [role="button"], [role="listitem"], button'))) {
-        const node = element as HTMLElement;
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        if (rect.width <= 0 || rect.height <= 0 || style.visibility === 'hidden' || style.display === 'none') continue;
-        const aria = normalize(element.getAttribute('aria-label') ?? '');
-        const text = normalize(node.innerText || element.textContent || '');
-        const firstLine = normalize((node.innerText || element.textContent || '').split('\n').find(Boolean) ?? '');
-        const values = [aria, text, firstLine, stripThreadMeta(text), stripThreadMeta(firstLine)].filter(Boolean).map((value) => value.toLowerCase());
-        if (values.some((value) => value === target)) {
-          node.click();
-          return true;
-        }
-      }
-      return false;
-    }, threadTitle).catch(() => false);
-  }
-
   private async detectThreadState(page: Page, workspaceName: string): Promise<ThreadOption[]> {
     const workspaceState = await this.detectWorkspaceState(page);
-    return page.evaluate(({ workspaceName, workspaceNames }) => {
-      const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim();
-      const stripThreadMeta = (value: string): string => normalize(value).replace(/\s+(?:now|\d+[smhdw])$/i, '').trim();
-      const workspaceSet = new Set([workspaceName, ...workspaceNames, 'Chats'].map((value) => normalize(value).toLowerCase()).filter(Boolean));
-      const blocked = /^(archive(?: chat)?|pin(?: chat)?|filter(?: sidebar chats)?|collapse(?: all)?|add(?: new project)?|new|new chat|search|skills|plugins|automations|projects|show more|settings|help|chats)$/i;
-      const action = /^(project actions for|start new chat in|open project actions|more actions)/i;
-      const results: { title: string; active?: boolean }[] = [];
-      const seen = new Set<string>();
-      const nav = document.querySelector('nav') ?? document;
-      const roots: Element[] = [];
-      const targetWorkspace = normalize(workspaceName).toLowerCase();
-
-      if (targetWorkspace === 'chats') {
-        roots.push(...Array.from(nav.querySelectorAll('[role="list"]')).filter((element) => normalize(element.getAttribute('aria-label') ?? '').toLowerCase() === 'chats'));
-      } else {
-        roots.push(...Array.from(nav.querySelectorAll('[role="listitem"][aria-label]')).filter((element) => normalize(element.getAttribute('aria-label') ?? '').toLowerCase() === targetWorkspace));
-      }
-      const searchRoots = roots.length > 0 ? roots : [nav];
-
-      for (const root of searchRoots) for (const element of Array.from(root.querySelectorAll('a, [role="button"], [role="listitem"], button'))) {
-        const node = element as HTMLElement;
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        if (rect.width <= 0 || rect.height <= 0 || style.visibility === 'hidden' || style.display === 'none') continue;
-
-        const aria = normalize(element.getAttribute('aria-label') ?? '');
-        const rawText = node.innerText || element.textContent || '';
-        const lines = rawText.split('\n').map(normalize).filter(Boolean);
-        const title = stripThreadMeta(lines[0] ?? aria);
-        const key = title.toLowerCase();
-        if (!title || title.length > 220) continue;
-        if (blocked.test(title) || action.test(aria) || workspaceSet.has(key)) continue;
-        if (/ctrl\+/i.test(title) || title.includes('…') || title === '.') continue;
-        if (seen.has(key)) continue;
-
-        const active = element.getAttribute('aria-current') === 'true'
-          || element.getAttribute('aria-selected') === 'true'
-          || element.getAttribute('data-state') === 'active';
-        seen.add(key);
-        results.push({ title, active });
-      }
-
-      return results.slice(0, 30);
-    }, { workspaceName, workspaceNames: workspaceState.workspaces }).catch((error: unknown) => {
+    return detectCodexThreadState(page, workspaceName, workspaceState.workspaces).catch((error: unknown) => {
       this.options.logger.warn('Could not detect Codex threads', { workspaceName, error: error instanceof Error ? error.message : String(error) });
       return [];
     });
   }
 
   private async detectWorkspaceState(page: Page): Promise<{ activeWorkspace?: string; workspaces: string[] }> {
-    return page.evaluate(() => {
-      const names = new Set<string>();
-      for (const element of Array.from(document.querySelectorAll('nav [role="button"], nav [role="listitem"], nav button[aria-label]'))) {
-        const aria = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim();
-        const projectAction = aria.match(/^Project actions for (.+)$/i)?.[1];
-        const startNew = aria.match(/^Start new chat in (.+)$/i)?.[1];
-        const exact = aria && !/^(archive|pin|filter|collapse|add|new|search|skills|plugins|automations|projects|project actions for|start new chat in|show more)/i.test(aria) ? aria : '';
-        for (const candidate of [projectAction, startNew, exact]) {
-          const value = (candidate ?? '').replace(/\s+/g, ' ').trim();
-          if (value && value.length <= 80 && !value.includes('\n') && !/ctrl\+/i.test(value)) names.add(value);
-        }
-      }
-
-      const selected = Array.from(document.querySelectorAll('nav [aria-current="true"], nav [aria-selected="true"], nav [data-state="active"]'))
-        .map((element) => (element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim() || ((element as HTMLElement).innerText || element.textContent || '').replace(/\s+/g, ' ').trim())
-        .find(Boolean);
-
-      return { activeWorkspace: selected || undefined, workspaces: Array.from(names).sort((a, b) => a.localeCompare(b)) };
-    }).catch(() => ({ workspaces: [] }));
+    return detectCodexWorkspaceState(page);
   }
 
   private throwIfAborted(signal: AbortSignal): void {
@@ -546,11 +349,4 @@ function uniqueNames(names: string[]): string[] {
     result.push(name);
   }
   return result;
-}
-
-interface CodexRuntimeState {
-  stopCount: number;
-  runningCount: number;
-  sendCount: number;
-  composerTextLength: number;
 }
